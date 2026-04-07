@@ -17,8 +17,8 @@ class PositionBiasTest(BaseBiasTest):
 
     def run(self, judge: BaseJudge, dataset: List[AnchorDatasetItem]) -> BiasTestResult:
         logger.info(f"Running Position Bias test with {judge.model_name} on {len(dataset)} items.")
-        
-        reversals = 0
+
+        position_consistent_choices = 0
         valid_items = 0
         
         for item in dataset:
@@ -50,21 +50,22 @@ class PositionBiasTest(BaseBiasTest):
                 # E.g. pref_1 == "A" and pref_2 == "A" -> Chose 1st pos both times
                 # E.g. pref_1 == "B" and pref_2 == "B" -> Chose 2nd pos both times
                 # These are reversals in content preference!
-                reversals += 1
+                position_consistent_choices += 1
                 
         if valid_items == 0:
             logger.warning("No valid items (non-ties) to compute position bias.")
             score = 0.0
         else:
-            score = reversals / valid_items
+            score = position_consistent_choices / valid_items
             
-        logger.info(f"Position Bias score: {score:.2f} ({reversals}/{valid_items} reversals)")
+        logger.info(f"Position Bias score: {score:.2f} ({position_consistent_choices}/{valid_items} position_consistent_choices)")
         
         return BiasTestResult(
             bias_name=self.name,
             score=score,
             details={
-                "reversals": reversals,
+                "position_consistent_choices": position_consistent_choices,
+                "reversals": position_consistent_choices,
                 "valid_items": valid_items,
                 "total_items": len(dataset),
             }

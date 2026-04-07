@@ -47,7 +47,7 @@ A pip-installable CLI (`llm-judge-audit`) that:
 | # | Bias | What it measures | Test method |
 |---|------|-----------------|-------------|
 | 1 | **Position bias** | Does the judge prefer whichever response appears first (or second)? | Swap response order in pairwise comparisons; measure reversal rate |
-| 2 | **Verbosity bias** | Does the judge reward length independent of quality? | Pad responses with semantically empty filler; measure score inflation |
+| 2 | **Verbosity bias** | Does the judge reward length independent of quality? | Pad the baseline-losing response with semantically empty filler; measure preference flip rate toward padded losers |
 | 3 | **Self-enhancement bias** | Does the judge favor outputs from its own model family? | Present known GPT-4/Claude/Gemini outputs; test each with the matching judge |
 | 4 | **Sycophancy bias** | Does the judge capitulate when given a "suggested rating"? | Provide judge with prior scores or user opinions; measure drift toward those anchors |
 | 5 | **Anchoring bias** | Do prior scores in the session skew subsequent scores? | Vary what scores appear before the target item; measure pull effect |
@@ -127,7 +127,7 @@ Tasks:
 - [x] Design the 100-item human-annotated anchor dataset schema (domain, prompt, response A, response B, human preference)
 - [x] Source human annotations via Prolific (launch study, ~$150 budget, 3 raters per item)
 - [x] Implement bias test #1: **position bias** (swap response order, measure reversal rate)
-- [x] Implement bias test #2: **verbosity bias** (pad responses, measure score inflation)
+- [x] Implement bias test #2: **verbosity bias** (pad the losing response, measure flip rate toward the padded loser)
 - [x] Write unit tests for the judge interface and first two bias modules
 
 **End-of-week checkpoint:** CLI runs `llm-judge-audit --model gpt-4o --tests position,verbosity` and produces a structured JSON report.

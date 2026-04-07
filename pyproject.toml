@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "llm-judge-audit"
+version = "0.1.0"
+description = "LLM Judge Calibration Suite"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "click",
+    "requests",
+    "pydantic"
+]
+
+[project.scripts]
+llm-judge-audit = "llm_judge_audit.cli:main"

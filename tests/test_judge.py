@@ -78,8 +78,8 @@ def test_anthropic_judge_evaluate(mock_anthropic):
     assert result_error == "Tie"
 
 
-@patch("google.generativeai.configure")
-@patch("google.generativeai.GenerativeModel")
+@patch("google.genai.configure")
+@patch("google.geneai.GenerativeModel")
 def test_gemini_judge_evaluate(mock_genai_model, mock_configure):
     # Mock the Gemini client response
     mock_model_instance = MagicMock()

@@ -3,7 +3,7 @@ __pycache__/
 *$py.class
 *.so
 .Python
-.env.example
+.env
 env/
 build/
 develop-eggs/

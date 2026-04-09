@@ -42,7 +42,7 @@ def _dataset_items():
 
 
 def test_resolve_tests_all_and_subset():
-    assert _resolve_tests("all") == ["position", "verbosity"]
+    assert _resolve_tests("all") == ["position", "verbosity", "cross_run", "sycophancy", "self_enhancement", "recency", "format_bias", "anchoring", "confidence_gap"]
     assert _resolve_tests("position") == ["position"]
 
 

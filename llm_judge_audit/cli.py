@@ -6,6 +6,13 @@ import click
 
 from llm_judge_audit.biases.position import PositionBiasTest
 from llm_judge_audit.biases.verbosity import VerbosityBiasTest
+from llm_judge_audit.biases.cross_run import CrossRunConsistencyTest
+from llm_judge_audit.biases.sycophancy import SycophancyBiasTest
+from llm_judge_audit.biases.self_enhancement import SelfEnhancementBiasTest
+from llm_judge_audit.biases.recency import RecencyBiasTest
+from llm_judge_audit.biases.format_bias import FormatBiasTest
+from llm_judge_audit.biases.anchoring import AnchoringBiasTest
+from llm_judge_audit.biases.confidence_gap import ConfidenceGapTest
 from llm_judge_audit.judge import get_judge
 from llm_judge_audit.logger import logger
 from llm_judge_audit.report import (
@@ -20,6 +27,13 @@ from llm_judge_audit.report import (
 BIAS_TEST_REGISTRY = {
     "position": PositionBiasTest,
     "verbosity": VerbosityBiasTest,
+    "cross_run": CrossRunConsistencyTest,
+    "sycophancy": SycophancyBiasTest,
+    "self_enhancement": SelfEnhancementBiasTest,
+    "recency": RecencyBiasTest,
+    "format_bias": FormatBiasTest,
+    "anchoring": AnchoringBiasTest,
+    "confidence_gap": ConfidenceGapTest,
 }
 
 
@@ -30,7 +44,7 @@ BIAS_TEST_REGISTRY = {
     "--tests",
     default="all",
     show_default=True,
-    help="Comma-separated bias tests to run. Supported: position,verbosity or 'all'.",
+    help="Comma-separated bias tests to run. Supported: position,verbosity,cross_run,sycophancy,self_enhancement,recency,format_bias,anchoring,confidence_gap or 'all'.",
 )
 @click.option(
     "--dataset",

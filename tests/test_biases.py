@@ -340,13 +340,35 @@ def test_anchoring_bias_no_bias(dummy_dataset):
     assert result.details["switches_to_anchor"] == 0
 
 def test_confidence_gap_bias(dummy_dataset):
-    # Just verify that the ConfidenceGapTest placeholder works
+    class OverconfidentUnstableJudge(MockJudge):
+        def __init__(self):
+            super().__init__(lambda p, a, b: "A")
+            self.calls = 0
+
+        def evaluate_pairwise_with_confidence(self, prompt, a, b):
+            self.calls += 1
+            preference = "A" if self.calls % 2 else "B"
+            return preference, 0.95
+
+    judge = OverconfidentUnstableJudge()
+    test = ConfidenceGapTest()
+    result = test.run(judge, dummy_dataset)
+
+    # Alternating preferences across 3 runs gives stability of 2/3 per item.
+    # Gap per item is |0.95 - 0.666...| ~= 0.2833
+    assert result.score == pytest.approx(0.2833333333, rel=1e-4)
+    assert result.details["items_with_confidence"] == 2
+    assert result.details["items_without_confidence"] == 0
+
+
+def test_confidence_gap_without_confidence_scores(dummy_dataset):
     judge = MockJudge(lambda p, a, b: "A")
     test = ConfidenceGapTest()
     result = test.run(judge, dummy_dataset)
-    
+
     assert result.score == 0.0
-    assert "note" in result.details
+    assert result.details["items_with_confidence"] == 0
+    assert result.details["items_without_confidence"] == 2
 
 def test_domain_transfer_bias(dummy_dataset):
     # Mock judge that only gets code right, fails factual

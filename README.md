@@ -115,6 +115,38 @@ The JRI gives teams a single number they can report in methods sections and inte
 
 ---
 
+## Prolific Annotation Workflow (practical)
+
+1. Export tasks to Prolific from `llm_judge_audit/datasets/prolific_tasks.csv`.
+2. Collect a CSV export with at least:
+   - `item_id`
+   - participant/rater id (default expected column: `participant_id`)
+   - `preference` (`A`, `B`, or `Tie`)
+   - optional `confidence` (1–5) and `rationale`
+3. Merge annotations back into the anchor dataset:
+
+```bash
+python -m llm_judge_audit.datasets.prolific \
+  --anchor llm_judge_audit/datasets/anchor.json \
+  --annotations prolific_export.csv \
+  --output llm_judge_audit/datasets/anchor_annotated.json
+```
+
+This recomputes `majority_preference`, updates `human_annotations`, and marks unanimous items as `is_gold_standard=true`.
+
+While responses are still coming in, you can monitor progress without writing merged output:
+
+```bash
+python -m llm_judge_audit.datasets.prolific \
+  --anchor llm_judge_audit/datasets/anchor.json \
+  --annotations prolific_export.csv \
+  --progress-only
+```
+
+If you want to snapshot partial results before every item has 3 annotations, add `--allow-partial` to the merge command.
+
+---
+
 ## Roadmap
 
 ### Week 1 — Foundation

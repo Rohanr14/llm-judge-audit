@@ -1,7 +1,9 @@
 from click.testing import CliRunner
 
 from llm_judge_audit.biases.position import PositionBiasTest
-from llm_judge_audit.cli import _resolve_tests, main
+from llm_judge_audit.biases.cross_run import CrossRunConsistencyTest
+from llm_judge_audit.biases.confidence_gap import ConfidenceGapTest
+from llm_judge_audit.cli import _build_test_instance, _resolve_tests, main
 from llm_judge_audit.datasets.schema import AnchorDatasetItem, HumanAnnotation
 from llm_judge_audit.judge import BaseJudge
 from llm_judge_audit.report import (
@@ -46,6 +48,16 @@ def test_resolve_tests_all_and_subset():
     assert _resolve_tests("position") == ["position"]
 
 
+def test_build_test_instance_with_custom_runs():
+    cross_run_test = _build_test_instance("cross_run", cross_run_runs=5, confidence_runs=3)
+    confidence_test = _build_test_instance("confidence_gap", cross_run_runs=3, confidence_runs=6)
+
+    assert isinstance(cross_run_test, CrossRunConsistencyTest)
+    assert cross_run_test.n_runs == 5
+    assert isinstance(confidence_test, ConfidenceGapTest)
+    assert confidence_test.n_runs == 6
+
+
 def test_report_helpers():
     judge = AlwaysAJudge()
     items = _dataset_items()
@@ -55,6 +67,19 @@ def test_report_helpers():
     bias_result = PositionBiasTest().run(judge, items)
     summaries = summarize_bias_results([bias_result])
     assert summaries[0].bias_key == "position"
+
+
+def test_bias_key_aliases_apply_thresholds():
+    judge = AlwaysAJudge()
+    items = _dataset_items()
+
+    cross_run_summary = summarize_bias_results([CrossRunConsistencyTest(n_runs=3).run(judge, items)])[0]
+    confidence_summary = summarize_bias_results([ConfidenceGapTest(n_runs=3).run(judge, items)])[0]
+
+    assert cross_run_summary.bias_key == "cross_run"
+    assert cross_run_summary.threshold == 0.35
+    assert confidence_summary.bias_key == "confidence_gap"
+    assert confidence_summary.threshold == 0.35
 
 
 def test_cli_runs(tmp_path):

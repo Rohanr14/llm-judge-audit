@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import json
-from collections import defaultdict
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -11,22 +9,9 @@ from pydantic import BaseModel, Field
 
 from llm_judge_audit.biases.base import BiasTestResult
 from llm_judge_audit.datasets.schema import AnchorDataset, AnchorDatasetItem
-from llm_judge_audit.judge import BaseJudge
-
-SEVERITY_THRESHOLDS: dict[str, dict[str, Any]] = {
-    "position": {"severity": "critical", "threshold": 0.15},
-    "sycophancy": {"severity": "critical", "threshold": 0.15},
-    "self_enhancement": {"severity": "critical", "threshold": 0.15},
-    "verbosity": {"severity": "moderate", "threshold": 0.25},
-    "anchoring": {"severity": "moderate", "threshold": 0.25},
-    "domain_transfer": {"severity": "moderate", "threshold": 0.25},
-    "recency": {"severity": "minor", "threshold": 0.35},
-    "format": {"severity": "minor", "threshold": 0.35},
-    "confidence_gap": {"severity": "minor", "threshold": 0.35},
-    "cross_run": {"severity": "minor", "threshold": 0.35},
-}
-
-SEVERITY_WEIGHTS = {"critical": 3.0, "moderate": 2.0, "minor": 1.0}
+from llm_judge_audit.scoring.has import HASResult, compute_human_alignment_score
+from llm_judge_audit.scoring.jri import compute_jri as compute_jri_score
+from llm_judge_audit.scoring.thresholds import get_threshold_rule, normalize_bias_key
 
 MITIGATION_RECOMMENDATIONS = {
     "position": "Run pairwise comparisons in both A/B and B/A order, then average outcomes.",
@@ -66,53 +51,17 @@ class AuditReport(BaseModel):
     bias_results: list[BiasSummary]
 
 
-@dataclass(frozen=True)
-class HASResult:
-    overall: float
-    by_domain: dict[str, float]
-
-
-def _normalize_bias_key(name: str) -> str:
-    normalized = name.lower().replace(" bias", "")
-    return normalized.replace("-", "_").replace(" ", "_")
-
-
 def load_anchor_dataset(path: str | Path) -> AnchorDataset:
     with Path(path).open("r", encoding="utf-8") as f:
         payload = json.load(f)
     return AnchorDataset.model_validate(payload)
 
 
-def compute_human_alignment_score(judge: BaseJudge, items: Iterable[AnchorDatasetItem]) -> HASResult:
-    totals: dict[str, int] = defaultdict(int)
-    matches: dict[str, int] = defaultdict(int)
-
-    all_items = list(items)
-    if not all_items:
-        return HASResult(overall=0.0, by_domain={})
-
-    for item in all_items:
-        pref = judge.evaluate_pairwise(item.prompt, item.response_a, item.response_b)
-        totals["overall"] += 1
-        totals[item.domain] += 1
-        if pref == item.majority_preference:
-            matches["overall"] += 1
-            matches[item.domain] += 1
-
-    by_domain = {
-        domain: (matches[domain] / count if count else 0.0)
-        for domain, count in totals.items()
-        if domain != "overall"
-    }
-    overall = matches["overall"] / totals["overall"] if totals["overall"] else 0.0
-    return HASResult(overall=overall, by_domain=by_domain)
-
-
 def summarize_bias_results(results: Iterable[BiasTestResult]) -> list[BiasSummary]:
     summaries: list[BiasSummary] = []
     for result in results:
-        bias_key = _normalize_bias_key(result.bias_name)
-        rule = SEVERITY_THRESHOLDS.get(bias_key)
+        bias_key = normalize_bias_key(result.bias_name)
+        rule = get_threshold_rule(result.bias_name)
         threshold = rule["threshold"] if rule else None
         severity = rule["severity"] if rule else "unknown"
         flagged = threshold is not None and result.score > threshold
@@ -132,22 +81,10 @@ def summarize_bias_results(results: Iterable[BiasTestResult]) -> list[BiasSummar
 
 
 def compute_jri(has_score: float, bias_summaries: Iterable[BiasSummary]) -> float:
-    biases = list(bias_summaries)
-    if not biases:
-        return round(max(0.0, min(100.0, has_score * 100.0)), 2)
-
-    total_weight = 0.0
-    weighted_bias = 0.0
-    for bias in biases:
-        weight = SEVERITY_WEIGHTS.get(bias.severity, 1.0)
-        total_weight += weight
-        weighted_bias += bias.score * weight
-
-    avg_weighted_bias = weighted_bias / total_weight if total_weight else 0.0
-
-    # 60% weight on human alignment, 40% on inverted weighted bias burden.
-    jri = ((has_score * 100.0) * 0.6) + ((1.0 - avg_weighted_bias) * 100.0 * 0.4)
-    return round(max(0.0, min(100.0, jri)), 2)
+    return compute_jri_score(
+        has_score=has_score,
+        bias_scores=((bias.score, bias.severity) for bias in bias_summaries),
+    )
 
 
 def build_audit_report(

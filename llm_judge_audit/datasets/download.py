@@ -1,12 +1,15 @@
 import json
-import os
 import time
 from collections import Counter
+from pathlib import Path
 import pandas as pd
 from datasets import load_dataset
 from llm_judge_audit.config import config
 
 MIN_FIELD_LEN = 50
+DATASET_DIR = Path("llm_judge_audit/datasets")
+ANCHOR_PATH = DATASET_DIR / "anchor.json"
+PROLIFIC_TASKS_PATH = DATASET_DIR / "prolific_tasks.csv"
 
 
 def get_items_from_source(dataset_name: str, split: str, config_name: str = None, retries: int = 3):
@@ -26,11 +29,11 @@ def get_items_from_source(dataset_name: str, split: str, config_name: str = None
             if attempt < retries - 1:
                 print(f"  Attempt {attempt + 1} failed: {e}. Retrying in 5s...")
                 time.sleep(5)
-                return None
+                continue
             else:
                 print(f"FAILED to load {dataset_name}: {e}")
                 return pd.DataFrame()
-    return None
+    return pd.DataFrame()
 
 
 def classify_domain(prompt: str) -> str:
@@ -177,17 +180,17 @@ def fetch_and_transform_all_sources():
     print(f"\nSource breakdown: {source_breakdown}")
     print(f"Domain breakdown: {domain_breakdown}")
 
-    os.makedirs("llm_judge_audit/datasets", exist_ok=True)
+    DATASET_DIR.mkdir(parents=True, exist_ok=True)
 
-    with open("anchor.json", "w") as f:
+    with ANCHOR_PATH.open("w", encoding="utf-8") as f:
         json.dump({"version": "1.0", "items": all_items}, f, indent=2)
 
     pd.DataFrame(all_items)[
         ["item_id", "domain", "prompt", "response_a", "response_b"]
-    ].to_csv("prolific_tasks.csv", index=False)
+    ].to_csv(PROLIFIC_TASKS_PATH, index=False)
 
     print(f"VALIDATED: {len(all_items)} items sourced.")
-    print("Output: anchor.json, prolific_tasks.csv")
+    print(f"Output: {ANCHOR_PATH}, {PROLIFIC_TASKS_PATH}")
 
 
 if __name__ == "__main__":

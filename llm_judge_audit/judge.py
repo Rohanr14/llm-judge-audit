@@ -1,4 +1,5 @@
 import json
+import importlib
 from abc import ABC, abstractmethod
 from typing import Literal
 
@@ -16,6 +17,15 @@ class BaseJudge(ABC):
     def evaluate_pairwise(self, prompt: str, response_a: str, response_b: str) -> Literal["A", "B", "Tie"]:
         """Evaluates two responses and returns the preferred one."""
         pass
+
+    def evaluate_pairwise_with_confidence(
+        self, prompt: str, response_a: str, response_b: str
+    ) -> tuple[Literal["A", "B", "Tie"], float | None]:
+        """
+        Optional extension used by confidence calibration tests.
+        Returns a (preference, confidence) tuple where confidence is in [0.0, 1.0].
+        """
+        return self.evaluate_pairwise(prompt, response_a, response_b), None
 
 class OpenAIJudge(BaseJudge):
     def __init__(self, model_name: str, api_key: str | None = None):
@@ -103,12 +113,20 @@ class AnthropicJudge(BaseJudge):
 class GeminiJudge(BaseJudge):
     def __init__(self, model_name: str, api_key: str | None = None):
         super().__init__(model_name, api_key or config.GEMINI_API_KEY)
-        import google.generativeai as genai
-        genai.configure(api_key=self.api_key)
-        self.model = genai.GenerativeModel(self.model_name)
+        self.model = None
+        try:
+            genai = importlib.import_module("google.generativeai")
+            genai.configure(api_key=self.api_key)
+            self.model = genai.GenerativeModel(self.model_name)
+        except ModuleNotFoundError:
+            logger.warning(
+                "google-generativeai is not installed; GeminiJudge will return 'Tie'."
+            )
 
     def evaluate_pairwise(self, prompt: str, response_a: str, response_b: str) -> Literal["A", "B", "Tie"]:
         logger.debug(f"Gemini evaluate_pairwise called with {self.model_name}")
+        if self.model is None:
+            return "Tie"
         full_prompt = (
             "You are an expert evaluator. You will be provided with a prompt and two responses (Response A and Response B). "
             "Your task is to evaluate which response better addresses the prompt. "

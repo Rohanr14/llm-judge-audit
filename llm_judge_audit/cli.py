@@ -58,6 +58,20 @@ BIAS_TEST_REGISTRY = {
 @click.option("--output", "json_output", default="audit_report.json", show_default=True, help="JSON output file path.")
 @click.option("--html-output", default=None, help="Optional HTML output file path.")
 @click.option("--pretty/--no-pretty", default=True, show_default=True, help="Print terminal summary.")
+@click.option(
+    "--cross-run-runs",
+    default=3,
+    show_default=True,
+    type=click.IntRange(min=2),
+    help="Number of repeated runs for cross-run consistency test.",
+)
+@click.option(
+    "--confidence-runs",
+    default=3,
+    show_default=True,
+    type=click.IntRange(min=2),
+    help="Number of repeated runs for confidence-consistency gap test.",
+)
 def main(
     model_name: str,
     api_key: str | None,
@@ -66,6 +80,8 @@ def main(
     json_output: str,
     html_output: str | None,
     pretty: bool,
+    cross_run_runs: int,
+    confidence_runs: int,
 ) -> None:
     """Run LLM judge bias audit and emit machine-readable and human-readable reports."""
     selected = _resolve_tests(tests)
@@ -76,7 +92,11 @@ def main(
 
     bias_results = []
     for test_key in selected:
-        test = BIAS_TEST_REGISTRY[test_key]()
+        test = _build_test_instance(
+            test_key=test_key,
+            cross_run_runs=cross_run_runs,
+            confidence_runs=confidence_runs,
+        )
         bias_results.append(test.run(judge, dataset.items))
 
     has_result = compute_human_alignment_score(judge, dataset.items)
@@ -115,6 +135,14 @@ def _resolve_tests(raw_tests: str) -> list[str]:
     if not selected:
         raise click.BadParameter("No tests selected.", param_hint="--tests")
     return selected
+
+
+def _build_test_instance(test_key: str, cross_run_runs: int, confidence_runs: int):
+    if test_key == "cross_run":
+        return CrossRunConsistencyTest(n_runs=cross_run_runs)
+    if test_key == "confidence_gap":
+        return ConfidenceGapTest(n_runs=confidence_runs)
+    return BIAS_TEST_REGISTRY[test_key]()
 
 
 if __name__ == "__main__":

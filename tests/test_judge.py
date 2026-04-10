@@ -78,12 +78,13 @@ def test_anthropic_judge_evaluate(mock_anthropic):
     assert result_error == "Tie"
 
 
-@patch("google.genai.configure")
-@patch("google.geneai.GenerativeModel")
-def test_gemini_judge_evaluate(mock_genai_model, mock_configure):
+@patch("llm_judge_audit.judge.importlib.import_module")
+def test_gemini_judge_evaluate(mock_import_module):
     # Mock the Gemini client response
+    mock_genai = MagicMock()
+    mock_import_module.return_value = mock_genai
     mock_model_instance = MagicMock()
-    mock_genai_model.return_value = mock_model_instance
+    mock_genai.GenerativeModel.return_value = mock_model_instance
     
     mock_response = MagicMock()
     mock_response.text = '{"preference": "Tie"}'
@@ -93,10 +94,17 @@ def test_gemini_judge_evaluate(mock_genai_model, mock_configure):
     result = judge.evaluate_pairwise("Which is better?", "Response A", "Response B")
     
     assert result == "Tie"
-    mock_configure.assert_called_once_with(api_key="test-key")
+    mock_genai.configure.assert_called_once_with(api_key="test-key")
     mock_model_instance.generate_content.assert_called_once()
 
     # Test error handling
     mock_model_instance.generate_content.side_effect = Exception("API Error")
     result_error = judge.evaluate_pairwise("Which is better?", "Response A", "Response B")
     assert result_error == "Tie"
+
+
+@patch("llm_judge_audit.judge.importlib.import_module", side_effect=ModuleNotFoundError)
+def test_gemini_judge_missing_dependency_returns_tie(_mock_import_module):
+    judge = GeminiJudge("gemini-1.5-pro", api_key="test-key")
+    result = judge.evaluate_pairwise("Which is better?", "Response A", "Response B")
+    assert result == "Tie"

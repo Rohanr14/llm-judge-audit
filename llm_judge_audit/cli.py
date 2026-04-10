@@ -13,6 +13,7 @@ from llm_judge_audit.biases.recency import RecencyBiasTest
 from llm_judge_audit.biases.format_bias import FormatBiasTest
 from llm_judge_audit.biases.anchoring import AnchoringBiasTest
 from llm_judge_audit.biases.confidence_gap import ConfidenceGapTest
+from llm_judge_audit.biases import DomainTransferBiasTest
 from llm_judge_audit.judge import get_judge
 from llm_judge_audit.logger import logger
 from llm_judge_audit.report import (
@@ -34,6 +35,7 @@ BIAS_TEST_REGISTRY = {
     "format_bias": FormatBiasTest,
     "anchoring": AnchoringBiasTest,
     "confidence_gap": ConfidenceGapTest,
+    "domain_transfer": DomainTransferBiasTest,
 }
 
 

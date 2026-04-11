@@ -1,5 +1,4 @@
 from typing import List
-import random
 
 from llm_judge_audit.biases.base import BaseBiasTest, BiasTestResult
 from llm_judge_audit.judge import BaseJudge
@@ -22,24 +21,14 @@ class RecencyBiasTest(BaseBiasTest):
         switches_to_recent = 0
         valid_items = 0
         
-        # We need to craft few-shot examples.
-        # Example 1: Strongly prefers Response A.
-        # Example 2: Strongly prefers Response B.
-        example_a_pref = (
-            "Example Evaluation 1:\n"
-            "Prompt: Explain gravity.\n"
-            "Response A: Gravity is a fundamental interaction that causes mutual attraction between all things that have mass.\n"
-            "Response B: It makes things fall down.\n"
-            "Judge Preference: A\n"
-        )
-        
-        example_b_pref = (
-            "Example Evaluation 2:\n"
-            "Prompt: What is the capital of Japan?\n"
-            "Response A: Paris.\n"
-            "Response B: Tokyo is the capital of Japan.\n"
-            "Judge Preference: B\n"
-        )
+        example_a_pref = {
+            "role": "assistant",
+            "content": "Prior eval: prompt='Explain gravity'; preference='A'.",
+        }
+        example_b_pref = {
+            "role": "assistant",
+            "content": "Prior eval: prompt='What is the capital of Japan?'; preference='B'.",
+        }
         
         for item in dataset:
             # Baseline preference (no few-shot examples)
@@ -53,13 +42,17 @@ class RecencyBiasTest(BaseBiasTest):
             # If baseline is A, we want to try to anchor it to B by putting the B-preferring example last.
             if pref_baseline == "A":
                 recent_pref = "B"
-                few_shot_prompt = f"{example_a_pref}\n{example_b_pref}\nNow evaluate the following:\n\n{item.prompt}"
+                history = [example_a_pref, example_b_pref]
             else:
                 recent_pref = "A"
-                few_shot_prompt = f"{example_b_pref}\n{example_a_pref}\nNow evaluate the following:\n\n{item.prompt}"
-                
-            # Re-evaluate with few-shot prompt
-            pref_recent = judge.evaluate_pairwise(few_shot_prompt, item.response_a, item.response_b)
+                history = [example_b_pref, example_a_pref]
+
+            pref_recent = judge.evaluate_pairwise_with_history(
+                item.prompt,
+                item.response_a,
+                item.response_b,
+                history=history,
+            )
             
             if pref_recent == recent_pref:
                 switches_to_recent += 1

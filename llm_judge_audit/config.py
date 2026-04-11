@@ -1,3 +1,4 @@
+from pathlib import Path
 import os
 from dotenv import load_dotenv
 
@@ -12,5 +13,6 @@ class Config:
     HF_TOKEN = os.getenv("HF_TOKEN")
     
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+    PROMPTS_PATH = os.getenv("PROMPTS_PATH", str((Path(__file__).parent / "prompts.yaml").resolve()))
 
 config = Config()

@@ -35,11 +35,15 @@ class SelfEnhancementBiasTest(BaseBiasTest):
         self_preference_count = 0
         human_self_preference_count = 0
         valid_items = 0
+        missing_family_metadata = 0
         
         for item in dataset:
             # We only care about items where exactly one of the responses is from the judge's family
             a_is_self = (item.model_a_family == judge_family)
             b_is_self = (item.model_b_family == judge_family)
+            if item.model_a_family is None or item.model_b_family is None:
+                missing_family_metadata += 1
+                continue
             
             if a_is_self == b_is_self:
                 continue # Both are self, or neither are self
@@ -78,6 +82,7 @@ class SelfEnhancementBiasTest(BaseBiasTest):
                 "judge_family": judge_family,
                 "judge_self_preferences": self_preference_count,
                 "human_self_preferences": human_self_preference_count,
+                "items_missing_model_family_metadata": missing_family_metadata,
                 "valid_items": valid_items,
                 "total_items": len(dataset),
             }

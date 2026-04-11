@@ -1,9 +1,10 @@
 from typing import List
 
 from llm_judge_audit.biases.base import BaseBiasTest, BiasTestResult
-from llm_judge_audit.judge import BaseJudge
 from llm_judge_audit.datasets.schema import AnchorDatasetItem
+from llm_judge_audit.judge import BaseJudge
 from llm_judge_audit.logger import logger
+
 
 class PositionBiasTest(BaseBiasTest):
     """
@@ -16,57 +17,45 @@ class PositionBiasTest(BaseBiasTest):
         return "Position bias"
 
     def run(self, judge: BaseJudge, dataset: List[AnchorDatasetItem]) -> BiasTestResult:
-        logger.info(f"Running Position Bias test with {judge.model_name} on {len(dataset)} items.")
+        logger.info("Running Position Bias test with %s on %s items.", judge.model_name, len(dataset))
 
-        position_consistent_choices = 0
-        valid_items = 0
-        
-        for item in dataset:
-            # First order: A is response_a, B is response_b
+        def evaluate_item(item: AnchorDatasetItem) -> tuple[str, str]:
             pref_1 = judge.evaluate_pairwise(item.prompt, item.response_a, item.response_b)
-            
-            # Second order: A is response_b, B is response_a
             pref_2 = judge.evaluate_pairwise(item.prompt, item.response_b, item.response_a)
-            
-            # Skip ties for reversal calculation as they are ambiguous
+            return pref_1, pref_2
+
+        outcomes = self._parallel_map(evaluate_item, dataset)
+
+        position_locked_choices = 0
+        valid_items = 0
+        tie_items = 0
+
+        for pref_1, pref_2 in outcomes:
             if pref_1 == "Tie" or pref_2 == "Tie":
+                tie_items += 1
                 continue
-                
+
             valid_items += 1
-            
-            # To be consistent, the model should choose the same *content*.
-            # If pref_1 == "A", it preferred item.response_a.
-            # In the second run, item.response_a is in position B.
-            # So a consistent judge would return "B" for pref_2.
-            # If it returns "A" for pref_2, it preferred item.response_b, meaning it changed its mind.
-            
-            if pref_1 == "A" and pref_2 == "B":
-                # Consistent preference for item.response_a
-                pass
-            elif pref_1 == "B" and pref_2 == "A":
-                # Consistent preference for item.response_b
-                pass
-            else:
-                # E.g. pref_1 == "A" and pref_2 == "A" -> Chose 1st pos both times
-                # E.g. pref_1 == "B" and pref_2 == "B" -> Chose 2nd pos both times
-                # These are reversals in content preference!
-                position_consistent_choices += 1
-                
-        if valid_items == 0:
-            logger.warning("No valid items (non-ties) to compute position bias.")
-            score = 0.0
-        else:
-            score = position_consistent_choices / valid_items
-            
-        logger.info(f"Position Bias score: {score:.2f} ({position_consistent_choices}/{valid_items} position_consistent_choices)")
-        
+            if (pref_1 == "A" and pref_2 == "A") or (pref_1 == "B" and pref_2 == "B"):
+                position_locked_choices += 1
+
+        score = position_locked_choices / valid_items if valid_items else 0.0
+        tie_rate = tie_items / len(dataset) if dataset else 0.0
+        logger.info(
+            "Position Bias score: %.2f (%s/%s position-locked choices).",
+            score,
+            position_locked_choices,
+            valid_items,
+        )
+
         return BiasTestResult(
             bias_name=self.name,
             score=score,
             details={
-                "position_consistent_choices": position_consistent_choices,
-                "reversals": position_consistent_choices,
+                "position_locked_choices": position_locked_choices,
                 "valid_items": valid_items,
+                "tie_items": tie_items,
+                "tie_rate": tie_rate,
                 "total_items": len(dataset),
-            }
+            },
         )

@@ -1,8 +1,8 @@
-import json
 import importlib
+import json
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 import yaml
 from tenacity import RetryError, retry, retry_if_exception, stop_after_attempt, wait_exponential
@@ -15,8 +15,27 @@ class JudgeAPIError(RuntimeError):
     """Raised when a judge API cannot return a valid preference after retries."""
 
 
+# Default sampling temperature for deterministic pairwise judgements. Bias
+# tests that need sampling variability (cross-run, confidence-gap) override
+# this at call time via the ``temperature`` kwarg.
+DEFAULT_TEMPERATURE = 0.0
+
+
 class BaseJudge(ABC):
-    """Abstract base class for all LLM judges."""
+    """Abstract base class for all LLM judges.
+
+    Subclasses implement ``_evaluate_pairwise_impl`` (the raw API call).
+    ``evaluate_pairwise`` is a non-overridable template method on the base
+    class that handles the runtime-wide judge cache. That way checkpointing
+    is free for every judge without having to reimplement the cache
+    plumbing in OpenAI/Anthropic/Gemini independently.
+
+    Note: we only cache deterministic single-shot calls (temperature 0 and
+    no few-shot history). Sampled calls (cross-run, confidence-gap) and
+    history-bearing calls (anchoring, recency) bypass the cache entirely --
+    the whole point of those tests is to get fresh samples or to let the
+    history condition the response.
+    """
 
     def __init__(self, model_name: str, api_key: str | None = None):
         self.model_name = model_name
@@ -27,18 +46,71 @@ class BaseJudge(ABC):
         """Returns the prompt family key used in prompts.yaml."""
         return "default"
 
+    def evaluate_pairwise(
+        self,
+        prompt: str,
+        response_a: str,
+        response_b: str,
+        temperature: float = DEFAULT_TEMPERATURE,
+    ) -> Literal["A", "B", "Tie"]:
+        """Evaluate two responses and return the preferred one.
+
+        Consults the runtime judge cache (if enabled) before calling the
+        underlying API, and records the result on a hit.
+        """
+        # Avoid an import cycle: runtime imports logger, which imports config.
+        from llm_judge_audit.runtime import SETTINGS
+
+        cache_key: str | None = None
+        if SETTINGS.cache_path is not None and temperature == 0.0:
+            cache_key = SETTINGS.make_key(
+                "pairwise",
+                self.model_name,
+                self.prompt_family,
+                prompt,
+                response_a,
+                response_b,
+            )
+            cached = SETTINGS.cache_get(cache_key)
+            if cached in ("A", "B", "Tie"):
+                return cached
+
+        result = self._evaluate_pairwise_impl(
+            prompt, response_a, response_b, temperature=temperature
+        )
+        if cache_key is not None:
+            SETTINGS.cache_put(cache_key, result)
+        return result
+
     @abstractmethod
-    def evaluate_pairwise(self, prompt: str, response_a: str, response_b: str) -> Literal["A", "B", "Tie"]:
-        """Evaluates two responses and returns the preferred one."""
+    def _evaluate_pairwise_impl(
+        self,
+        prompt: str,
+        response_a: str,
+        response_b: str,
+        temperature: float = DEFAULT_TEMPERATURE,
+    ) -> Literal["A", "B", "Tie"]:
+        """Subclass hook: the actual provider API call, no caching."""
 
     def evaluate_pairwise_with_confidence(
-        self, prompt: str, response_a: str, response_b: str
+        self,
+        prompt: str,
+        response_a: str,
+        response_b: str,
+        temperature: float = DEFAULT_TEMPERATURE,
     ) -> tuple[Literal["A", "B", "Tie"], float | None]:
         """
         Optional extension used by confidence calibration tests.
         Returns a (preference, confidence) tuple where confidence is in [0.0, 1.0].
         """
-        return self.evaluate_pairwise(prompt, response_a, response_b), None
+        # Note: does NOT use the cache -- sampled calls must produce genuine
+        # variability for cross-run / confidence tests.
+        return (
+            self._evaluate_pairwise_impl(
+                prompt, response_a, response_b, temperature=temperature
+            ),
+            None,
+        )
 
     def evaluate_pairwise_with_history(
         self,
@@ -46,14 +118,19 @@ class BaseJudge(ABC):
         response_a: str,
         response_b: str,
         history: list[dict[str, str]],
+        temperature: float = DEFAULT_TEMPERATURE,
     ) -> Literal["A", "B", "Tie"]:
         """
         Optional extension used by conversational-context bias tests.
-        The default fallback serializes history into the prompt.
+        The default fallback serializes history into the prompt. Subclasses
+        that can send real role-alternating history should override this.
+        Does not consult the cache (history changes the output by design).
         """
         history_block = "\n".join(f"{turn['role']}: {turn['content']}" for turn in history)
         merged_prompt = f"{history_block}\n\nCurrent prompt:\n{prompt}" if history_block else prompt
-        return self.evaluate_pairwise(merged_prompt, response_a, response_b)
+        return self._evaluate_pairwise_impl(
+            merged_prompt, response_a, response_b, temperature=temperature
+        )
 
 
 def _is_transient_error(exc: Exception) -> bool:
@@ -142,22 +219,37 @@ class OpenAIJudge(BaseJudge):
         messages.append({"role": "user", "content": user_prompt})
         return messages
 
-    def _call_api(self, prompt: str, response_a: str, response_b: str, history: list[dict[str, str]] | None = None) -> str:
+    def _call_api(
+        self,
+        prompt: str,
+        response_a: str,
+        response_b: str,
+        history: list[dict[str, str]] | None = None,
+        temperature: float = DEFAULT_TEMPERATURE,
+    ) -> str:
         response = self.client.chat.completions.create(
             model=self.model_name,
             messages=self._build_messages(prompt, response_a, response_b, history=history),
             response_format={"type": "json_object"},
-            temperature=0.0,
+            temperature=temperature,
         )
         result_json = response.choices[0].message.content
         if result_json is None:
             raise JudgeAPIError("Received empty response from OpenAI API.")
         return result_json
 
-    def evaluate_pairwise(self, prompt: str, response_a: str, response_b: str) -> Literal["A", "B", "Tie"]:
-        logger.debug("OpenAI evaluate_pairwise called with %s", self.model_name)
+    def _evaluate_pairwise_impl(
+        self,
+        prompt: str,
+        response_a: str,
+        response_b: str,
+        temperature: float = DEFAULT_TEMPERATURE,
+    ) -> Literal["A", "B", "Tie"]:
+        logger.debug("OpenAI _evaluate_pairwise_impl called with %s", self.model_name)
         try:
-            result_json = _retry_transient(lambda: self._call_api(prompt, response_a, response_b))
+            result_json = _retry_transient(
+                lambda: self._call_api(prompt, response_a, response_b, temperature=temperature)
+            )
             return _parse_preference_from_json(result_json)
         except RetryError as exc:
             logger.error("OpenAI transient retries exhausted: %s", exc)
@@ -174,9 +266,14 @@ class OpenAIJudge(BaseJudge):
         response_a: str,
         response_b: str,
         history: list[dict[str, str]],
+        temperature: float = DEFAULT_TEMPERATURE,
     ) -> Literal["A", "B", "Tie"]:
         try:
-            result_json = _retry_transient(lambda: self._call_api(prompt, response_a, response_b, history=history))
+            result_json = _retry_transient(
+                lambda: self._call_api(
+                    prompt, response_a, response_b, history=history, temperature=temperature
+                )
+            )
             return _parse_preference_from_json(result_json)
         except Exception as exc:
             if isinstance(exc, JudgeAPIError):
@@ -207,20 +304,35 @@ class AnthropicJudge(BaseJudge):
         messages.append({"role": "user", "content": user_prompt})
         return messages
 
-    def _call_api(self, prompt: str, response_a: str, response_b: str, history: list[dict[str, str]] | None = None) -> str:
+    def _call_api(
+        self,
+        prompt: str,
+        response_a: str,
+        response_b: str,
+        history: list[dict[str, str]] | None = None,
+        temperature: float = DEFAULT_TEMPERATURE,
+    ) -> str:
         response = self.client.messages.create(
             model=self.model_name,
             system=_get_system_prompt(self.prompt_family),
             messages=self._build_messages(prompt, response_a, response_b, history=history),
             max_tokens=100,
-            temperature=0.0,
+            temperature=temperature,
         )
         return response.content[0].text
 
-    def evaluate_pairwise(self, prompt: str, response_a: str, response_b: str) -> Literal["A", "B", "Tie"]:
-        logger.debug("Anthropic evaluate_pairwise called with %s", self.model_name)
+    def _evaluate_pairwise_impl(
+        self,
+        prompt: str,
+        response_a: str,
+        response_b: str,
+        temperature: float = DEFAULT_TEMPERATURE,
+    ) -> Literal["A", "B", "Tie"]:
+        logger.debug("Anthropic _evaluate_pairwise_impl called with %s", self.model_name)
         try:
-            content = _retry_transient(lambda: self._call_api(prompt, response_a, response_b))
+            content = _retry_transient(
+                lambda: self._call_api(prompt, response_a, response_b, temperature=temperature)
+            )
             return _parse_preference_from_json(content)
         except RetryError as exc:
             logger.error("Anthropic transient retries exhausted: %s", exc)
@@ -237,9 +349,14 @@ class AnthropicJudge(BaseJudge):
         response_a: str,
         response_b: str,
         history: list[dict[str, str]],
+        temperature: float = DEFAULT_TEMPERATURE,
     ) -> Literal["A", "B", "Tie"]:
         try:
-            content = _retry_transient(lambda: self._call_api(prompt, response_a, response_b, history=history))
+            content = _retry_transient(
+                lambda: self._call_api(
+                    prompt, response_a, response_b, history=history, temperature=temperature
+                )
+            )
             return _parse_preference_from_json(content)
         except Exception as exc:
             if isinstance(exc, JudgeAPIError):
@@ -262,20 +379,36 @@ class GeminiJudge(BaseJudge):
         except ModuleNotFoundError as exc:
             raise JudgeAPIError("google-generativeai is not installed; GeminiJudge cannot be used.") from exc
 
-    def _call_api(self, prompt: str, response_a: str, response_b: str) -> str:
+    def _call_api(
+        self,
+        prompt: str,
+        response_a: str,
+        response_b: str,
+        temperature: float = DEFAULT_TEMPERATURE,
+    ) -> str:
         full_prompt = (
             f"{_get_system_prompt(self.prompt_family)}\n\n"
             f"Prompt:\n{prompt}\n\nResponse A:\n{response_a}\n\nResponse B:\n{response_b}"
         )
-        response = self.model.generate_content(full_prompt, generation_config={"temperature": 0.0})
+        response = self.model.generate_content(
+            full_prompt, generation_config={"temperature": temperature}
+        )
         return response.text
 
-    def evaluate_pairwise(self, prompt: str, response_a: str, response_b: str) -> Literal["A", "B", "Tie"]:
-        logger.debug("Gemini evaluate_pairwise called with %s", self.model_name)
+    def _evaluate_pairwise_impl(
+        self,
+        prompt: str,
+        response_a: str,
+        response_b: str,
+        temperature: float = DEFAULT_TEMPERATURE,
+    ) -> Literal["A", "B", "Tie"]:
+        logger.debug("Gemini _evaluate_pairwise_impl called with %s", self.model_name)
         if self.model is None:
             raise JudgeAPIError("Gemini model is not initialized.")
         try:
-            content = _retry_transient(lambda: self._call_api(prompt, response_a, response_b))
+            content = _retry_transient(
+                lambda: self._call_api(prompt, response_a, response_b, temperature=temperature)
+            )
             return _parse_preference_from_json(content)
         except RetryError as exc:
             logger.error("Gemini transient retries exhausted: %s", exc)

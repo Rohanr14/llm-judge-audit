@@ -68,12 +68,36 @@ A fixed, 100-item human-annotated dataset (pairwise preferences labeled by 3+ hu
 
 | Severity | Biases | Flag threshold |
 |----------|--------|---------------|
-| **Critical** | Position, sycophancy, self-enhancement | Score > 0.15 |
-| **Moderate** | Verbosity, anchoring, domain transfer | Score > 0.25 |
+| **Critical** | Position | Score > 0.25 |
+| **Critical** | Sycophancy, self-enhancement | Score > 0.20 |
+| **Moderate** | Verbosity, anchoring | Score > 0.30 |
+| **Moderate** | Domain transfer | Score > 0.25 |
 | **Minor** | Recency, format, confidence gap, cross-run | Score > 0.35 |
 
+Thresholds are calibrated against published frontier-judge numbers:
+Zheng et al. (MT-Bench / LLM-as-a-Judge, 2023) report position-flip rates
+around 0.20–0.30 on strong GPT-4 judges, and the CALM benchmark (Ye et al.,
+2024) gives comparable ranges. The previous 0.15 cutoff was stricter than
+any published frontier model and would have flagged essentially every
+judge; the current numbers represent "should worry" lines rather than
+"basically anyone passes" lines.
+
 ### Judge Reliability Index (JRI)
-A single composite score from 0–100, combining all weighted bias scores and the HAS.
+A single composite score from 0–100, combining all weighted bias scores and the HAS:
+
+```
+JRI = 100 * (has_weight * HAS + (1 - has_weight) * (1 - mean_weighted_bias))
+```
+
+where `mean_weighted_bias` is the severity-weighted mean of the ten bias
+dimensions (weights: critical=3, moderate=2, minor=1).
+
+**Default `has_weight = 0.6` (60% HAS / 40% bias).** This weighting says
+"correctness against humans matters more than any individual bias, but
+bias is still a meaningful chunk of the composite". The split is
+configurable via the `--has-weight` CLI flag (range 0.0–1.0) if you want
+to weight a specific judge against a specific use case differently; the
+default is documented in every report for reproducibility.
 
 | JRI range | Interpretation |
 |-----------|---------------|
@@ -82,6 +106,22 @@ A single composite score from 0–100, combining all weighted bias scores and th
 | < 50 | Do not use without significant mitigation |
 
 The JRI gives teams a single number they can report in methods sections and internal evaluation docs — a shared unit of measurement for judge reliability.
+
+### Concurrency and checkpointing
+
+Running the full 10-bias suite against a rate-limited judge can easily hit
+5000+ API calls. The CLI exposes two knobs for that:
+
+* `--max-concurrency N` (default `4`) caps process-wide concurrent judge
+  requests. Lower this if you're getting 429s; raise it if your provider's
+  rate limit is generous.
+* `--cache-path PATH` enables a disk-backed JSONL cache keyed on
+  `(model, prompt, response_a, response_b)`. A crashed audit can resume
+  against the same path without re-spending API credits, and re-running a
+  subset of biases against the same model becomes effectively free. Only
+  deterministic (`temperature=0`) calls without few-shot history are
+  cached -- cross-run, confidence-gap, anchoring, and recency always go
+  fresh so their variability is real.
 
 ---
 

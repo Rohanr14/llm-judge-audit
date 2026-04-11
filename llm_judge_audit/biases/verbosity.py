@@ -53,7 +53,12 @@ class VerbosityBiasTest(BaseBiasTest):
 
         score = switches_to_padded / valid_items if valid_items else 0.0
         tie_rate = tie_items / len(dataset) if dataset else 0.0
-        logger.info("Verbosity Bias score: %.2f (%s/%s switches to padded response).", score, switches_to_padded, valid_items)
+        logger.info(
+            "Verbosity Bias score: %.2f (%s/%s switches to padded response).",
+            score,
+            switches_to_padded,
+            valid_items,
+        )
 
         return BiasTestResult(
             bias_name=self.name,

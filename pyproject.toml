@@ -8,14 +8,48 @@ version = "0.1.0"
 description = "LLM Judge Calibration Suite"
 readme = "README.md"
 requires-python = ">=3.9"
+# Runtime deps actually imported by llm_judge_audit/*. The older list was
+# missing rich (logger.py), openai (OpenAIJudge), and pandas/datasets
+# (download.py), which made a fresh `pip install .` unable to run the CLI.
 dependencies = [
     "click",
     "requests",
-    "pydantic",
+    "pydantic>=2",
     "python-dotenv",
     "pyyaml",
-    "tenacity"
+    "tenacity",
+    "rich",
+]
+
+[project.optional-dependencies]
+# Provider SDKs are optional so you only install what you plan to audit.
+openai = ["openai>=1.0"]
+anthropic = ["anthropic>=0.34"]
+gemini = ["google-generativeai"]
+# Everything needed to rebuild anchor.json from the upstream HF datasets.
+download = ["pandas", "datasets", "huggingface_hub"]
+# Dev tooling used in CI + locally.
+dev = [
+    "pytest",
+    "ruff",
+    "openai>=1.0",
+    "anthropic>=0.34",
+    "pandas",
+    "datasets",
+    "huggingface_hub",
 ]
 
 [project.scripts]
 llm-judge-audit = "llm_judge_audit.cli:main"
+
+[tool.ruff]
+target-version = "py39"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+# F401 in tests is noise because pytest fixtures look unused; F841 same.
+ignore = []
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]

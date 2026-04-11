@@ -1,9 +1,10 @@
-from click.testing import CliRunner
 from unittest.mock import patch
 
-from llm_judge_audit.biases.position import PositionBiasTest
-from llm_judge_audit.biases.cross_run import CrossRunConsistencyTest
+from click.testing import CliRunner
+
 from llm_judge_audit.biases.confidence_gap import ConfidenceGapTest
+from llm_judge_audit.biases.cross_run import CrossRunConsistencyTest
+from llm_judge_audit.biases.position import PositionBiasTest
 from llm_judge_audit.cli import _build_test_instance, _resolve_tests, main
 from llm_judge_audit.datasets.schema import AnchorDatasetItem, HumanAnnotation
 from llm_judge_audit.judge import BaseJudge
@@ -17,7 +18,7 @@ class AlwaysAJudge(BaseJudge):
     def __init__(self):
         super().__init__("always-a")
 
-    def evaluate_pairwise(self, prompt, response_a, response_b):
+    def _evaluate_pairwise_impl(self, prompt, response_a, response_b, temperature=0.0):
         return "A"
 
 

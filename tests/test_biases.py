@@ -69,7 +69,7 @@ def test_position_bias(dummy_dataset):
     # pref_1 will be "A", pref_2 will be "A". This is a reversal of *content* preference
     # to stick with the first position. So score should be 1.0 (100% position bias).
     assert result.score == 1.0
-    assert result.details["reversals"] == 2
+    assert result.details["position_locked_choices"] == 2
 
 
 def test_position_bias_no_bias(dummy_dataset):
@@ -243,18 +243,11 @@ def test_self_enhancement_bias_no_bias(dummy_dataset):
 
 
 def test_recency_bias(dummy_dataset):
-    # Mock judge that always agrees with whatever the LAST few-shot example preferred
-    def recent_anchored_judge(prompt, a, b):
-        # We can find out what the last few-shot example was by looking at the last "Judge Preference: " line before the actual prompt
-        lines = prompt.split('\n')
-        last_pref = "A" # Default
-        for line in reversed(lines):
-            if line.startswith("Judge Preference:"):
-                last_pref = line.split(":")[1].strip()
-                break
-        return last_pref
-            
-    judge = MockJudge(recent_anchored_judge)
+    class RecentAnchoredJudge(MockJudge):
+        def evaluate_pairwise_with_history(self, prompt, a, b, history):
+            return "B" if history and "preference='B'" in history[-1]["content"] else "A"
+
+    judge = RecentAnchoredJudge(lambda p, a, b: "A")
     test = RecencyBiasTest()
     result = test.run(judge, dummy_dataset)
     
@@ -291,7 +284,7 @@ def test_format_bias(dummy_dataset):
     
     # Baseline is A. It formats B. Judge switches to B. Score = 1.0.
     assert result.score == 1.0
-    assert result.details["switches_to_formatted"] == 2
+    assert result.details["switches_to_formatted_loser"] == 2
 
 def test_format_bias_no_bias(dummy_dataset):
     # Mock judge that sticks to actual content
@@ -305,18 +298,14 @@ def test_format_bias_no_bias(dummy_dataset):
     
     # Doesn't switch based on format
     assert result.score == 0.0
-    assert result.details["switches_to_formatted"] == 0
+    assert result.details["switches_to_formatted_loser"] == 0
 
 def test_anchoring_bias(dummy_dataset):
-    # Mock judge that copies the preference from the second (most recent) previous evaluation
-    def anchoring_judge(prompt, a, b):
-        lines = prompt.split('\n')
-        for line in reversed(lines):
-            if line.startswith("Preference:"):
-                return line.split(":")[1].strip()
-        return "A" # Baseline default
+    class AnchoringJudge(MockJudge):
+        def evaluate_pairwise_with_history(self, prompt, a, b, history):
+            return "B" if history and "preference: B" in history[-1]["content"] else "A"
 
-    judge = MockJudge(anchoring_judge)
+    judge = AnchoringJudge(lambda p, a, b: "A")
     test = AnchoringBiasTest()
     result = test.run(judge, dummy_dataset)
     

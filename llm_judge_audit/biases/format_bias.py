@@ -1,5 +1,4 @@
 from typing import List
-import re
 
 from llm_judge_audit.biases.base import BaseBiasTest, BiasTestResult
 from llm_judge_audit.judge import BaseJudge
@@ -19,7 +18,8 @@ class FormatBiasTest(BaseBiasTest):
     def run(self, judge: BaseJudge, dataset: List[AnchorDatasetItem]) -> BiasTestResult:
         logger.info(f"Running Format Bias test with {judge.model_name} on {len(dataset)} items.")
         
-        switches_to_formatted = 0
+        switches_to_formatted_loser = 0
+        switches_to_formatted_winner = 0
         valid_items = 0
         
         for item in dataset:
@@ -31,39 +31,65 @@ class FormatBiasTest(BaseBiasTest):
                 
             valid_items += 1
             
-            # Format the *losing* response
-            formatted_a = item.response_a
-            formatted_b = item.response_b
-            
+            # Treatment 1: format the *losing* response.
+            loser_formatted_a = item.response_a
+            loser_formatted_b = item.response_b
             if pref_baseline == "A":
-                # A won, so format B
-                formatted_b = self._apply_markdown_formatting(item.response_b)
+                loser_formatted_b = self._apply_markdown_formatting(item.response_b)
             else:
-                # B won, so format A
-                formatted_a = self._apply_markdown_formatting(item.response_a)
-                
-            # Re-evaluate
-            pref_formatted = judge.evaluate_pairwise(item.prompt, formatted_a, formatted_b)
-            
-            # Did the judge switch its preference to the now-formatted loser?
-            if pref_baseline == "A" and pref_formatted == "B":
-                switches_to_formatted += 1
-            elif pref_baseline == "B" and pref_formatted == "A":
-                switches_to_formatted += 1
+                loser_formatted_a = self._apply_markdown_formatting(item.response_a)
+
+            pref_loser_formatted = judge.evaluate_pairwise(
+                item.prompt,
+                loser_formatted_a,
+                loser_formatted_b,
+            )
+
+            if (pref_baseline == "A" and pref_loser_formatted == "B") or (
+                pref_baseline == "B" and pref_loser_formatted == "A"
+            ):
+                switches_to_formatted_loser += 1
+
+            # Treatment 2: format the *winning* response to control for general formatting preference.
+            winner_formatted_a = item.response_a
+            winner_formatted_b = item.response_b
+            if pref_baseline == "A":
+                winner_formatted_a = self._apply_markdown_formatting(item.response_a)
+            else:
+                winner_formatted_b = self._apply_markdown_formatting(item.response_b)
+
+            pref_winner_formatted = judge.evaluate_pairwise(
+                item.prompt,
+                winner_formatted_a,
+                winner_formatted_b,
+            )
+            if (pref_baseline == "A" and pref_winner_formatted == "B") or (
+                pref_baseline == "B" and pref_winner_formatted == "A"
+            ):
+                switches_to_formatted_winner += 1
                 
         if valid_items == 0:
             logger.warning("No valid items (with clear baseline preference) to compute format bias.")
             score = 0.0
         else:
-            score = switches_to_formatted / valid_items
+            raw_loser_rate = switches_to_formatted_loser / valid_items
+            raw_winner_rate = switches_to_formatted_winner / valid_items
+            score = max(0.0, raw_loser_rate - raw_winner_rate)
             
-        logger.info(f"Format Bias score: {score:.2f} ({switches_to_formatted}/{valid_items} switches to formatted response)")
+        logger.info(
+            "Format Bias score: %.2f (%s loser-switches, %s winner-switches, %s valid).",
+            score,
+            switches_to_formatted_loser,
+            switches_to_formatted_winner,
+            valid_items,
+        )
         
         return BiasTestResult(
             bias_name=self.name,
             score=score,
             details={
-                "switches_to_formatted": switches_to_formatted,
+                "switches_to_formatted_loser": switches_to_formatted_loser,
+                "switches_to_formatted_winner": switches_to_formatted_winner,
                 "valid_items": valid_items,
                 "total_items": len(dataset),
             }

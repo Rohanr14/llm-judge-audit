@@ -40,6 +40,21 @@ class BaseJudge(ABC):
         """
         return self.evaluate_pairwise(prompt, response_a, response_b), None
 
+    def evaluate_pairwise_with_history(
+        self,
+        prompt: str,
+        response_a: str,
+        response_b: str,
+        history: list[dict[str, str]],
+    ) -> Literal["A", "B", "Tie"]:
+        """
+        Optional extension used by conversational-context bias tests.
+        The default fallback serializes history into the prompt.
+        """
+        history_block = "\n".join(f"{turn['role']}: {turn['content']}" for turn in history)
+        merged_prompt = f"{history_block}\n\nCurrent prompt:\n{prompt}" if history_block else prompt
+        return self.evaluate_pairwise(merged_prompt, response_a, response_b)
+
 
 def _is_transient_error(exc: Exception) -> bool:
     status_code = getattr(exc, "status_code", None) or getattr(getattr(exc, "response", None), "status_code", None)
@@ -110,14 +125,27 @@ class OpenAIJudge(BaseJudge):
 
         self.client = openai.OpenAI(api_key=self.api_key)
 
-    def _call_api(self, prompt: str, response_a: str, response_b: str) -> str:
+    def _build_messages(
+        self,
+        prompt: str,
+        response_a: str,
+        response_b: str,
+        history: list[dict[str, str]] | None = None,
+    ) -> list[dict[str, str]]:
         user_prompt = f"Prompt:\n{prompt}\n\nResponse A:\n{response_a}\n\nResponse B:\n{response_b}"
+        messages = [{"role": "system", "content": _get_system_prompt(self.prompt_family)}]
+        for turn in history or []:
+            role = turn.get("role", "user")
+            if role not in {"system", "user", "assistant"}:
+                role = "user"
+            messages.append({"role": role, "content": turn.get("content", "")})
+        messages.append({"role": "user", "content": user_prompt})
+        return messages
+
+    def _call_api(self, prompt: str, response_a: str, response_b: str, history: list[dict[str, str]] | None = None) -> str:
         response = self.client.chat.completions.create(
             model=self.model_name,
-            messages=[
-                {"role": "system", "content": _get_system_prompt(self.prompt_family)},
-                {"role": "user", "content": user_prompt},
-            ],
+            messages=self._build_messages(prompt, response_a, response_b, history=history),
             response_format={"type": "json_object"},
             temperature=0.0,
         )
@@ -140,6 +168,21 @@ class OpenAIJudge(BaseJudge):
                 raise
             raise JudgeAPIError(f"OpenAI judge request failed for model {self.model_name}.") from exc
 
+    def evaluate_pairwise_with_history(
+        self,
+        prompt: str,
+        response_a: str,
+        response_b: str,
+        history: list[dict[str, str]],
+    ) -> Literal["A", "B", "Tie"]:
+        try:
+            result_json = _retry_transient(lambda: self._call_api(prompt, response_a, response_b, history=history))
+            return _parse_preference_from_json(result_json)
+        except Exception as exc:
+            if isinstance(exc, JudgeAPIError):
+                raise
+            raise JudgeAPIError(f"OpenAI judge request failed for model {self.model_name}.") from exc
+
 
 class AnthropicJudge(BaseJudge):
     @property
@@ -152,12 +195,23 @@ class AnthropicJudge(BaseJudge):
 
         self.client = anthropic.Anthropic(api_key=self.api_key)
 
-    def _call_api(self, prompt: str, response_a: str, response_b: str) -> str:
+    def _build_messages(
+        self,
+        prompt: str,
+        response_a: str,
+        response_b: str,
+        history: list[dict[str, str]] | None = None,
+    ) -> list[dict[str, str]]:
         user_prompt = f"Prompt:\n{prompt}\n\nResponse A:\n{response_a}\n\nResponse B:\n{response_b}"
+        messages = list(history or [])
+        messages.append({"role": "user", "content": user_prompt})
+        return messages
+
+    def _call_api(self, prompt: str, response_a: str, response_b: str, history: list[dict[str, str]] | None = None) -> str:
         response = self.client.messages.create(
             model=self.model_name,
             system=_get_system_prompt(self.prompt_family),
-            messages=[{"role": "user", "content": user_prompt}],
+            messages=self._build_messages(prompt, response_a, response_b, history=history),
             max_tokens=100,
             temperature=0.0,
         )
@@ -173,6 +227,21 @@ class AnthropicJudge(BaseJudge):
             raise JudgeAPIError(f"Anthropic judge failed after retries for model {self.model_name}.") from exc
         except Exception as exc:
             logger.error("Error calling Anthropic API: %s", exc)
+            if isinstance(exc, JudgeAPIError):
+                raise
+            raise JudgeAPIError(f"Anthropic judge request failed for model {self.model_name}.") from exc
+
+    def evaluate_pairwise_with_history(
+        self,
+        prompt: str,
+        response_a: str,
+        response_b: str,
+        history: list[dict[str, str]],
+    ) -> Literal["A", "B", "Tie"]:
+        try:
+            content = _retry_transient(lambda: self._call_api(prompt, response_a, response_b, history=history))
+            return _parse_preference_from_json(content)
+        except Exception as exc:
             if isinstance(exc, JudgeAPIError):
                 raise
             raise JudgeAPIError(f"Anthropic judge request failed for model {self.model_name}.") from exc

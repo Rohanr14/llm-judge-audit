@@ -16,14 +16,23 @@ def get_items_from_source(dataset_name: str, split: str, config_name: str = None
     print(f"Loading {dataset_name} (split: {split}, config: {config_name})...")
     for attempt in range(retries):
         try:
-            ds = load_dataset(
-                dataset_name,
-                config_name,
-                split=split,
-                token=config.HF_TOKEN,
-                revision="refs/convert/parquet",
-                download_mode="reuse_dataset_if_exists",
-            )
+            try:
+                ds = load_dataset(
+                    dataset_name,
+                    config_name,
+                    split=split,
+                    token=config.HF_TOKEN,
+                    revision="refs/convert/parquet",
+                    download_mode="reuse_dataset_if_exists",
+                )
+            except Exception:
+                ds = load_dataset(
+                    dataset_name,
+                    config_name,
+                    split=split,
+                    token=config.HF_TOKEN,
+                    download_mode="reuse_dataset_if_exists",
+                )
             return ds.to_pandas()
         except Exception as e:
             if attempt < retries - 1:
@@ -53,29 +62,63 @@ def classify_domain(prompt: str) -> str:
     return "factual"
 
 
+def classify_difficulty(prompt: str) -> str:
+    tokens = len(prompt.split())
+    if tokens < 18:
+        return "easy"
+    if tokens <= 45:
+        return "medium"
+    return "hard"
+
+
+def infer_model_family(model_name: str | None) -> str | None:
+    if not model_name:
+        return None
+    name = model_name.lower()
+    if "gpt" in name or "o1" in name or "o3" in name:
+        return "gpt"
+    if "claude" in name:
+        return "claude"
+    if "gemini" in name:
+        return "gemini"
+    if "llama" in name:
+        return "llama"
+    if "mistral" in name or "mixtral" in name:
+        return "mistral"
+    if "qwen" in name:
+        return "qwen"
+    if "command" in name or "cohere" in name:
+        return "cohere"
+    return None
+
+
 def safe_extract(row, source_name: str):
-    """Maps each dataset's schema to (prompt, response_a, response_b)."""
+    """Maps each dataset's schema to (prompt, response_a, response_b, model_a_family, model_b_family)."""
     try:
         if source_name in ("lmsys", "mt_bench"):
             # Both datasets share the same conversation_a / conversation_b schema
+            model_a = row.get("model_a")
+            model_b = row.get("model_b")
             return (
                 row["conversation_a"][0]["content"],
                 row["conversation_a"][1]["content"],
                 row["conversation_b"][1]["content"],
+                infer_model_family(model_a),
+                infer_model_family(model_b),
             )
         elif source_name == "hh_rlhf":
             chosen = row.get("chosen", "")
             rejected = row.get("rejected", "")
             if not chosen or not rejected:
-                return None, None, None
+                return None, None, None, None, None
             prompt_parts = chosen.split("\n\nAssistant:")
             prompt = prompt_parts[0].replace("\n\nHuman:", "").strip()
             response_a = prompt_parts[1].strip() if len(prompt_parts) > 1 else ""
             response_b = rejected.split("\n\nAssistant:")[-1].strip()
-            return prompt, response_a, response_b
-        return None, None, None
+            return prompt, response_a, response_b, None, None
+        return None, None, None, None, None
     except (KeyError, IndexError, TypeError):
-        return None, None, None
+        return None, None, None, None, None
 
 
 def is_valid(p, ra, rb) -> bool:
@@ -126,7 +169,7 @@ def fetch_and_transform_all_sources():
         for _, source_name in sources
     }
 
-    def try_add(p, ra, rb, source_name, cap=None):
+    def try_add(p, ra, rb, source_name, cap=None, model_a_family=None, model_b_family=None):
         """Attempts to add an item; returns True if added."""
         if not is_valid(p, ra, rb):
             return False
@@ -140,9 +183,12 @@ def fetch_and_transform_all_sources():
         item = {
             "item_id": f"{source_name}-{domain}-{len(stratified_items[domain]):03d}",
             "domain": domain,
+            "difficulty": classify_difficulty(p),
             "prompt": p,
             "response_a": ra,
             "response_b": rb,
+            "model_a_family": model_a_family,
+            "model_b_family": model_b_family,
             "human_annotations": [],
             "majority_preference": "Tie",
         }
@@ -155,16 +201,32 @@ def fetch_and_transform_all_sources():
         for _, row in df.sample(frac=1, random_state=42).iterrows():
             if all(len(stratified_items[d]) >= target_counts[d] for d in target_counts):
                 break
-            p, ra, rb = safe_extract(row, source_name)
-            try_add(p, ra, rb, source_name, cap=per_source_cap)
+            p, ra, rb, model_a_family, model_b_family = safe_extract(row, source_name)
+            try_add(
+                p,
+                ra,
+                rb,
+                source_name,
+                cap=per_source_cap,
+                model_a_family=model_a_family,
+                model_b_family=model_b_family,
+            )
 
     # Pass 2: fill remaining slots from any source without cap
     for df, source_name in sources:
         for _, row in df.sample(frac=1, random_state=99).iterrows():
             if all(len(stratified_items[d]) >= target_counts[d] for d in target_counts):
                 break
-            p, ra, rb = safe_extract(row, source_name)
-            try_add(p, ra, rb, source_name, cap=None)
+            p, ra, rb, model_a_family, model_b_family = safe_extract(row, source_name)
+            try_add(
+                p,
+                ra,
+                rb,
+                source_name,
+                cap=None,
+                model_a_family=model_a_family,
+                model_b_family=model_b_family,
+            )
 
     all_items = (
         stratified_items["code"]

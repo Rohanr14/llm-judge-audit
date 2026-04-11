@@ -88,6 +88,12 @@ def main(
     logger.info("Selected tests: %s", ", ".join(selected))
 
     dataset = load_anchor_dataset(dataset_path)
+    annotated_items = sum(1 for item in dataset.items if len(item.human_annotations) >= 3 and item.majority_preference in {"A", "B"})
+    if annotated_items == 0:
+        raise click.ClickException(
+            "Audit incomplete: dataset has no fully annotated items with A/B majority preference yet. "
+            "Run once Prolific annotations are merged."
+        )
     judge = get_judge(model_name, api_key=api_key)
 
     try:

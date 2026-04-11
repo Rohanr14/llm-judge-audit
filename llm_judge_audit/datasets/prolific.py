@@ -6,7 +6,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
-from llm_judge_audit.datasets.schema import AnchorDataset, HumanAnnotation
+from llm_judge_audit.datasets.schema import AnchorDataset
 
 
 def _normalize_preference(value: str) -> str | None:

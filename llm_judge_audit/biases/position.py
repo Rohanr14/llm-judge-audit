@@ -26,7 +26,7 @@ class PositionBiasTest(BaseBiasTest):
 
         outcomes = self._parallel_map(evaluate_item, dataset)
 
-        reversals = 0
+        position_locked_choices = 0
         valid_items = 0
         tie_items = 0
 
@@ -37,17 +37,22 @@ class PositionBiasTest(BaseBiasTest):
 
             valid_items += 1
             if (pref_1 == "A" and pref_2 == "A") or (pref_1 == "B" and pref_2 == "B"):
-                reversals += 1
+                position_locked_choices += 1
 
-        score = reversals / valid_items if valid_items else 0.0
+        score = position_locked_choices / valid_items if valid_items else 0.0
         tie_rate = tie_items / len(dataset) if dataset else 0.0
-        logger.info("Position Bias score: %.2f (%s/%s reversals).", score, reversals, valid_items)
+        logger.info(
+            "Position Bias score: %.2f (%s/%s position-locked choices).",
+            score,
+            position_locked_choices,
+            valid_items,
+        )
 
         return BiasTestResult(
             bias_name=self.name,
             score=score,
             details={
-                "reversals": reversals,
+                "position_locked_choices": position_locked_choices,
                 "valid_items": valid_items,
                 "tie_items": tie_items,
                 "tie_rate": tie_rate,

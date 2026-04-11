@@ -1,0 +1,21 @@
+pairwise_evaluation:
+  default:
+    system_prompt: >-
+      You are an expert evaluator. You will be provided with a prompt and two responses
+      (Response A and Response B). Evaluate which response better addresses the prompt.
+      Return only valid JSON with a single key "preference" and value "A", "B", or "Tie".
+  openai:
+    system_prompt: >-
+      You are an expert evaluator. You will be provided with a prompt and two responses
+      (Response A and Response B). Evaluate which response better addresses the prompt.
+      Return only valid JSON with a single key "preference" and value "A", "B", or "Tie".
+  anthropic:
+    system_prompt: >-
+      You are an expert evaluator. You will be provided with a prompt and two responses
+      (Response A and Response B). Evaluate which response better addresses the prompt.
+      Wrap your reasoning internally and return only JSON: {"preference": "A"|"B"|"Tie"}.
+  gemini:
+    system_prompt: >-
+      You are an expert evaluator. You will be provided with a prompt and two responses
+      (Response A and Response B). Evaluate which response better addresses the prompt.
+      Return strict JSON using this schema: {"preference": "A"|"B"|"Tie"}.

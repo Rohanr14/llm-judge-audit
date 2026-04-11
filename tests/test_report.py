@@ -1,4 +1,5 @@
 from click.testing import CliRunner
+from unittest.mock import patch
 
 from llm_judge_audit.biases.position import PositionBiasTest
 from llm_judge_audit.biases.cross_run import CrossRunConsistencyTest
@@ -90,21 +91,22 @@ def test_cli_runs(tmp_path):
     )
     out = tmp_path / "report.json"
 
-    result = runner.invoke(
-        main,
-        [
-            "--model",
-            "gpt-4o",
-            "--api-key",
-            "test-key",
-            "--tests",
-            "position",
-            "--dataset",
-            str(dataset),
-            "--output",
-            str(out),
-            "--no-pretty",
-        ],
-    )
+    with patch("llm_judge_audit.cli.get_judge", return_value=AlwaysAJudge()):
+        result = runner.invoke(
+            main,
+            [
+                "--model",
+                "gpt-4o",
+                "--api-key",
+                "test-key",
+                "--tests",
+                "position",
+                "--dataset",
+                str(dataset),
+                "--output",
+                str(out),
+                "--no-pretty",
+            ],
+        )
     assert result.exit_code == 0
     assert out.exists()

@@ -14,7 +14,7 @@ from llm_judge_audit.biases.format_bias import FormatBiasTest
 from llm_judge_audit.biases.anchoring import AnchoringBiasTest
 from llm_judge_audit.biases.confidence_gap import ConfidenceGapTest
 from llm_judge_audit.biases import DomainTransferBiasTest
-from llm_judge_audit.judge import get_judge
+from llm_judge_audit.judge import JudgeAPIError, get_judge
 from llm_judge_audit.logger import logger
 from llm_judge_audit.report import (
     build_audit_report,
@@ -90,16 +90,19 @@ def main(
     dataset = load_anchor_dataset(dataset_path)
     judge = get_judge(model_name, api_key=api_key)
 
-    bias_results = []
-    for test_key in selected:
-        test = _build_test_instance(
-            test_key=test_key,
-            cross_run_runs=cross_run_runs,
-            confidence_runs=confidence_runs,
-        )
-        bias_results.append(test.run(judge, dataset.items))
+    try:
+        bias_results = []
+        for test_key in selected:
+            test = _build_test_instance(
+                test_key=test_key,
+                cross_run_runs=cross_run_runs,
+                confidence_runs=confidence_runs,
+            )
+            bias_results.append(test.run(judge, dataset.items))
 
-    has_result = compute_human_alignment_score(judge, dataset.items)
+        has_result = compute_human_alignment_score(judge, dataset.items)
+    except JudgeAPIError as exc:
+        raise click.ClickException(f"Audit incomplete due to judge API failure: {exc}") from exc
 
     report = build_audit_report(
         model_name=model_name,

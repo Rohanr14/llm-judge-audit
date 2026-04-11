@@ -1,9 +1,9 @@
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from llm_judge_audit.judge import (
     AnthropicJudge,
-    BaseJudge,
     GeminiJudge,
     JudgeAPIError,
     OpenAIJudge,

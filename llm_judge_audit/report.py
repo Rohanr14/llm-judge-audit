@@ -8,11 +8,24 @@ from typing import Any, Iterable
 from pydantic import BaseModel, Field
 
 from llm_judge_audit.biases.base import BiasTestResult
-from llm_judge_audit.datasets.schema import AnchorDataset, AnchorDatasetItem
+from llm_judge_audit.datasets.schema import AnchorDataset
 from llm_judge_audit.mitigations import get_mitigation
 from llm_judge_audit.scoring.has import HASResult, compute_human_alignment_score
 from llm_judge_audit.scoring.jri import compute_jri as compute_jri_score
 from llm_judge_audit.scoring.thresholds import get_threshold_rule, normalize_bias_key
+
+__all__ = [
+    "AuditReport",
+    "BiasSummary",
+    "build_audit_report",
+    "compute_human_alignment_score",
+    "compute_jri",
+    "load_anchor_dataset",
+    "print_terminal_report",
+    "summarize_bias_results",
+    "write_html_report",
+    "write_json_report",
+]
 
 
 class BiasSummary(BaseModel):
@@ -68,10 +81,16 @@ def summarize_bias_results(results: Iterable[BiasTestResult]) -> list[BiasSummar
     return summaries
 
 
-def compute_jri(has_score: float, bias_summaries: Iterable[BiasSummary]) -> float:
+def compute_jri(
+    has_score: float,
+    bias_summaries: Iterable[BiasSummary],
+    *,
+    has_weight: float = 0.6,
+) -> float:
     return compute_jri_score(
         has_score=has_score,
         bias_scores=((bias.score, bias.severity) for bias in bias_summaries),
+        has_weight=has_weight,
     )
 
 
@@ -82,9 +101,10 @@ def build_audit_report(
     selected_tests: list[str],
     has_result: HASResult,
     bias_results: list[BiasTestResult],
+    has_weight: float = 0.6,
 ) -> AuditReport:
     summaries = summarize_bias_results(bias_results)
-    jri = compute_jri(has_result.overall, summaries)
+    jri = compute_jri(has_result.overall, summaries, has_weight=has_weight)
     flagged = [bias.bias_key for bias in summaries if bias.flagged]
 
     return AuditReport(
@@ -139,7 +159,11 @@ def write_html_report(report: AuditReport, path: str | Path) -> Path:
     out.parent.mkdir(parents=True, exist_ok=True)
 
     rows = "\n".join(
-        f"<tr><td>{b.bias_name}</td><td>{b.score:.3f}</td><td>{b.severity}</td><td>{'yes' if b.flagged else 'no'}</td><td>{b.mitigation or ''}</td></tr>"
+        (
+            f"<tr><td>{b.bias_name}</td><td>{b.score:.3f}</td>"
+            f"<td>{b.severity}</td><td>{'yes' if b.flagged else 'no'}</td>"
+            f"<td>{b.mitigation or ''}</td></tr>"
+        )
         for b in report.bias_results
     )
 

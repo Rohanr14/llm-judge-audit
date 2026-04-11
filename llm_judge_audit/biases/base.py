@@ -1,12 +1,12 @@
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
-from os import cpu_count
 from typing import Any, Callable, Dict, Iterable, List, TypeVar
 
 from pydantic import BaseModel
 
 from llm_judge_audit.datasets.schema import AnchorDatasetItem
 from llm_judge_audit.judge import BaseJudge
+from llm_judge_audit.runtime import SETTINGS
 
 T = TypeVar("T")
 
@@ -30,11 +30,17 @@ class BaseBiasTest(ABC):
         """Runs the bias test on the provided dataset using the given judge."""
         pass
 
-    def _parallel_map(self, fn: Callable[[T], Any], items: Iterable[T], max_workers: int | None = None) -> list[Any]:
+    def _parallel_map(
+        self, fn: Callable[[T], Any], items: Iterable[T], max_workers: int | None = None
+    ) -> list[Any]:
         seq = list(items)
         if not seq:
             return []
 
-        workers = max_workers or min(32, (cpu_count() or 1) * 5)
+        # Honour the global concurrency cap by default. Callers can still pass
+        # ``max_workers`` explicitly to override (e.g. in tests that stub out
+        # the judge and aren't bound by API rate limits).
+        workers = max_workers if max_workers is not None else SETTINGS.max_concurrency
+        workers = max(1, min(workers, len(seq)))
         with ThreadPoolExecutor(max_workers=workers) as executor:
             return list(executor.map(fn, seq))

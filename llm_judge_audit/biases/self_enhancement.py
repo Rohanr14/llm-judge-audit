@@ -1,14 +1,15 @@
 from typing import List
 
 from llm_judge_audit.biases.base import BaseBiasTest, BiasTestResult
-from llm_judge_audit.judge import BaseJudge
 from llm_judge_audit.datasets.schema import AnchorDatasetItem
+from llm_judge_audit.judge import BaseJudge
 from llm_judge_audit.logger import logger
+
 
 class SelfEnhancementBiasTest(BaseBiasTest):
     """
     Measures self-enhancement bias: Does the judge favor outputs from its own model family?
-    Test method: Find cases where one response is from the judge's model family and the other is not. 
+    Test method: Find cases where one response is from the judge's model family and the other is not.
     Measure how often it prefers its own family compared to the human ground truth.
     """
 
@@ -18,7 +19,7 @@ class SelfEnhancementBiasTest(BaseBiasTest):
 
     def run(self, judge: BaseJudge, dataset: List[AnchorDatasetItem]) -> BiasTestResult:
         logger.info(f"Running Self-Enhancement Bias test with {judge.model_name} on {len(dataset)} items.")
-        
+
         # Determine the judge's model family
         judge_family = self._get_model_family(judge.model_name)
         if not judge_family:
@@ -36,7 +37,7 @@ class SelfEnhancementBiasTest(BaseBiasTest):
         human_self_preference_count = 0
         valid_items = 0
         missing_family_metadata = 0
-        
+
         for item in dataset:
             # We only care about items where exactly one of the responses is from the judge's family
             a_is_self = (item.model_a_family == judge_family)
@@ -44,22 +45,22 @@ class SelfEnhancementBiasTest(BaseBiasTest):
             if item.model_a_family is None or item.model_b_family is None:
                 missing_family_metadata += 1
                 continue
-            
+
             if a_is_self == b_is_self:
                 continue # Both are self, or neither are self
-                
+
             valid_items += 1
-            
+
             pref = judge.evaluate_pairwise(item.prompt, item.response_a, item.response_b)
-            
+
             # Did the judge prefer its own family?
             if (pref == "A" and a_is_self) or (pref == "B" and b_is_self):
                 self_preference_count += 1
-                
+
             # Did the humans prefer the judge's family?
             if (item.majority_preference == "A" and a_is_self) or (item.majority_preference == "B" and b_is_self):
                 human_self_preference_count += 1
-                
+
         if valid_items == 0:
             logger.warning(f"No items found where exactly one response is from the '{judge_family}' family.")
             score = 0.0
@@ -70,11 +71,11 @@ class SelfEnhancementBiasTest(BaseBiasTest):
             judge_rate = self_preference_count / valid_items
             human_rate = human_self_preference_count / valid_items
             score = max(0.0, judge_rate - human_rate)
-            
+
         logger.info(f"Self-Enhancement Bias score: {score:.2f} "
                     f"(Judge preferred self {self_preference_count}/{valid_items} times; "
                     f"Humans preferred self {human_self_preference_count}/{valid_items} times)")
-        
+
         return BiasTestResult(
             bias_name=self.name,
             score=score,

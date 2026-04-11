@@ -1,5 +1,6 @@
-from pathlib import Path
 import os
+from pathlib import Path
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -11,7 +12,7 @@ class Config:
     MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
     COHERE_API_KEY = os.getenv("COHERE_API_KEY")
     HF_TOKEN = os.getenv("HF_TOKEN")
-    
+
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
     PROMPTS_PATH = os.getenv("PROMPTS_PATH", str((Path(__file__).parent / "prompts.yaml").resolve()))
 
